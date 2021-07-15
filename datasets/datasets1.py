@@ -67,13 +67,15 @@ class CombineDataset(Dataset):
 
 class SubsetDataset(Dataset):
     def __init__(self, subset, transform, target_transform):
+        super(SubsetDataset, self).__init__()
+
         self.subset = subset
         self.targets = []
         self.data = []
 
         for x, y in subset:
-            self.targets.append(x)
-            self.data.append(y)
+            self.data.append(x)
+            self.targets.append(y)
 
         self.transform = transform
         self.target_transform = target_transform
@@ -90,6 +92,32 @@ class SubsetDataset(Dataset):
 
     def __len__(self) -> int:
         return len(self.subset)
+
+
+class DataSetForLoader(Dataset):
+
+    def __init__(self, dataset_with_pil):
+        super(DataSetForLoader, self).__init__()
+
+        self.targets = []
+        self.data = []
+
+        for x, y in dataset_with_pil:
+            self.data.append(np.array(x))
+            self.targets.append(y)
+
+    def __getitem__(self, index: int):
+        """
+        Args:
+            index (int): Index
+
+        Returns:
+            tuple: (image, target) where target is index of the target class.
+        """
+        return self.data[index], self.targets[index]
+
+    def __len__(self) -> int:
+        return len(self.data)
 
 
 class KFoldDataset:

@@ -16,7 +16,7 @@ from tensorboardX import SummaryWriter
 
 from utils.utils import accuracy,AverageMeter, save_cfmatrix, nl_loss
 from utils.ema import EMA
-from datasets.datasets1 import BatchWeightedRandomSampler
+from datasets.datasets1 import BatchWeightedRandomSampler, DataSetForLoader
 from augmentations.ctaugment import deserialize
 
 def get_cosine_schedule_with_warmup(optimizer,
@@ -460,7 +460,7 @@ class FMExperiment(object):
 
     def test_loader(self,test_dataset):
         self.num_test_imgs = len(test_dataset) # same as len(dataloader)
-        self.test_dataloader = DataLoader(test_dataset,
+        self.test_dataloader = DataLoader(DataSetForLoader(test_dataset),
                                           batch_size=self.params.batch_size,
                                           shuffle=False,
                                           drop_last=False, 
