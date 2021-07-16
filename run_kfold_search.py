@@ -20,6 +20,7 @@ OUTER_KFOLD = 10
 INNER_KFOLD = 3
 N_SEARCHES = 50
 
+CSV_LOG_PATH = 'metrics_log.csv'
 
 @hydra.main(config_path='./config', config_name='config')
 def main(CONFIG: DictConfig) -> None:
@@ -44,6 +45,9 @@ def main(CONFIG: DictConfig) -> None:
     logger = setup_default_logging(CONFIG, string='Train')
     logger.info(CONFIG)
 
+    with open(CSV_LOG_PATH, 'a') as fd:
+        fd.write('acc,tpr,fpr,precision,auc,auc_precision_recall,training_time (s),time_took_per_1k (s)\n')
+
     # # For reproducibility, set random seed
     if CONFIG.Logging.seed == 'None':
         CONFIG.Logging.seed = random.randint(1, 10000)
@@ -63,6 +67,7 @@ def main(CONFIG: DictConfig) -> None:
     dataset.transform = None
     test_dataset.transform = None
 
+    training_time = None
     best_threshold, best_lambda = None, None
     idx_outer_fold = 0
     best_model_outer, best_model_top1_acc_outer = None, None
@@ -72,7 +77,7 @@ def main(CONFIG: DictConfig) -> None:
         outer_fold_val_dataset.transform = None
 
 
-        best_model_inner, best_model_top1_acc_inner = None, None
+        best_model_inner, best_model_top1_acc_inner, best_model_inner_metrics = None, None
         for search_idx in range(N_SEARCHES):
             # optimization for:
             # what thershold we need to have a confident label
@@ -114,11 +119,21 @@ def main(CONFIG: DictConfig) -> None:
                     experiment.unlabelled_loader(
                         unlabeled_training_dataset, CONFIG.DATASET.mu)
                 experiment.validation_loader(valid_dataset)
+
+                if training_time is None:
+                    start_fit = time.time()
+
                 experiment.fitting()
+
+                if training_time is None:
+                    end_fit = time.time()
+                    training_time = end_fit - start_fit   # seconds
+
                 print("======= Training done =======")
                 logger.info("======= Training done =======")
                 experiment.test_loader(valid_dataset)
-                test_loss, top1_acc, top5_acc = experiment.testing()
+                mtrcs = experiment.testing()
+                top1_acc = mtrcs[0]
                 print("======= Testing done =======")
                 logger.info("======= Testing done =======")
 
@@ -148,9 +163,14 @@ def main(CONFIG: DictConfig) -> None:
         experiment.test_loader(test_fold_dataset)
         print('======= Outer Fold Test ========')
         logger.info('======= Outer Fold Test ========')
-        test_loss, top1_acc, top5_acc = experiment.testing()
-        print(f'test loss: {test_loss}, top1 acc: {top1_acc}, top5 acc: {top5_acc}')
-        logger.info(f'test loss: {test_loss}, top1 acc: {top1_acc}, top5 acc: {top5_acc}')
+        acc, tpr, fpr, precision, auc, auc_precision_recall, time_took_per_1k = experiment.testing()
+
+        to_write = f'{acc},{tpr},{fpr},{precision},{auc},{auc_precision_recall},{training_time},{time_took_per_1k}'
+        with open(CSV_LOG_PATH, 'a') as fd:
+            fd.write(to_write + '\n')
+
+        print(to_write)
+        logger.info(to_write)
 
         idx_outer_fold += 1
 

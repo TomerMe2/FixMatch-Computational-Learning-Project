@@ -18,6 +18,8 @@ from utils.ema import EMA
 from datasets.datasets1 import BatchWeightedRandomSampler, DataSetForLoader
 from augmentations.ctaugment import deserialize
 
+from sklearn import metrics
+
 
 def get_cosine_schedule_with_warmup(optimizer,
                                     num_warmup_steps,
@@ -271,6 +273,9 @@ class FMExperiment(object):
         test_losses_meter = AverageMeter()
         top1_meter = AverageMeter()
         top5_meter = AverageMeter()
+        y_pred = []
+        y_pred_probas = []
+        y_true = []
         with torch.no_grad():
             for batch_idx, (inputs, targets) in enumerate(self.test_dataloader):
                 self.model.eval()
@@ -282,13 +287,58 @@ class FMExperiment(object):
                 # compute loss and accuracy
                 loss = F.cross_entropy(outputs, targets)
                 acc1, acc5 = accuracy(outputs, targets, topk=(1, 5))
+
+                batch_y_true = targets.argmax()
+                batch_y_pred = outputs.argmax()
+
+                y_true.extend(batch_y_true)
+                y_pred.extend(batch_y_pred)
+                y_pred_probas.extend(outputs.tolist())
                 # update recording
                 test_losses_meter.update(loss.item(), inputs.shape[0])
                 top1_meter.update(acc1.item(), inputs.shape[0])
                 top5_meter.update(acc5.item(), inputs.shape[0])
                 batch_time_meter.update(time.time() - start)
 
-        return test_losses_meter.avg, top1_meter.avg, top5_meter.avg
+            start_mes_time = time.time()
+            for batch_idx, (inputs, targets) in enumerate(self.test_dataloader):
+                if self.used_gpu:
+                    inputs = inputs.to(device=self.device)
+                    targets = targets.to(device=self.device)
+                    # forward
+                outputs = self.forward(inputs)
+            end_mes_time = time.time()
+
+
+        time_took = end_mes_time - start_mes_time  # seconds
+        time_took_per_1k = time_took * (1000 / len(y_true))
+
+        # from https://stackoverflow.com/questions/50666091/true-positive-rate-and-false-positive-rate-tpr-fpr-for-multi-class-data-in-py/50671617
+        cnf_matrix = metrics.confusion_matrix(y_true, y_pred)
+        FP = cnf_matrix.sum(axis=0) - np.diag(cnf_matrix)
+        FN = cnf_matrix.sum(axis=1) - np.diag(cnf_matrix)
+        TP = np.diag(cnf_matrix)
+        TN = cnf_matrix.sum() - (FP + FN + TP)
+
+        FP = FP.astype(float)
+        FN = FN.astype(float)
+        TP = TP.astype(float)
+        TN = TN.astype(float)
+
+        # Sensitivity, hit rate, recall, or true positive rate
+        tpr = TP / (TP + FN)
+        # Fall out or false positive rate
+        fpr = FP / (FP + TN)
+        # Precision or positive predictive value (PPV)
+        precision = TP / (TP + FP)
+
+        auc = metrics.auc(fpr, tpr)
+
+        pr, recall, thresholds = metrics.precision_recall_curve(y_true, y_pred_probas)
+        auc_precision_recall = metrics.auc(recall, pr)
+
+        # return test_losses_meter.avg, top1_meter.avg, top5_meter.avg
+        return top1_meter.avg, tpr, fpr, precision, auc, auc_precision_recall, time_took_per_1k
 
     def validation_step(self):
         logger.info("***** Running validation *****")
