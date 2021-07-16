@@ -21,7 +21,12 @@ TRANSFORM_CIFAR = {
     'CIFAR100':
         {'mean': (0.5071, 0.4867, 0.4408),
          'std': (0.2675, 0.2565, 0.2761)
-         }
+         },
+    # added by me
+    'Caltech101':
+        {'mean': (0.4914, 0.4822, 0.4465),
+         'std': (0.2471, 0.2435, 0.2616)}
+    # done
 }
 
 logger = logging.getLogger(__name__)
@@ -68,6 +73,14 @@ class LoadDataset_Vanilla(object):
             downloadFlag = not os.path.exists(os.path.join(self.datapath, 'cifar-100-batches-py'))
             trainset = torchvision.datasets.CIFAR100(root=self.datapath, train=True, transform=transform,download=downloadFlag)
             testset = torchvision.datasets.CIFAR100(root=self.datapath, train=False, transform=transform,download=downloadFlag)
+        # added by me
+        elif self.params.dataset == 'Caltech101':
+            downloadFlag = not os.path.exists(os.path.join(self.datapath, 'caltech-101-batches-py'))
+            Caltech_dataset = torchvision.datasets.Caltech101(root=self.datapath, transform=transform,download=downloadFlag)
+            train_size = int(0.8 * len(Caltech_dataset))
+            test_size = len(Caltech_dataset) - train_size
+            trainset ,testset = torch.utils.data.random_split(Caltech_dataset, [train_size, test_size])
+        # done
 
         logger.info(f"[Dataset] Loading original dataset {self.params.dataset}")
         logger.info(f"Training examples: {len(trainset)}"
