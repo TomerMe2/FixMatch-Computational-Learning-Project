@@ -16,6 +16,11 @@ from experiments import *
 from utils.utils import setup_default_logging
 
 
+OUTER_KFOLD = 10
+INNER_KFOLD = 3
+N_SEARCHES = 50
+
+
 @hydra.main(config_path='./config', config_name='config')
 def main(CONFIG: DictConfig) -> None:
     # # configuration
@@ -33,7 +38,7 @@ def main(CONFIG: DictConfig) -> None:
     #     except yaml.YAMLError as exc:
     #         print(exc)
     # CONFIG = edict(config_file)
-    print('==> CONFIG is: \n', OmegaConf.to_yaml(CONFIG), '\n')
+    # print('==> CONFIG is: \n', OmegaConf.to_yaml(CONFIG), '\n')
 
     # initial logging file
     logger = setup_default_logging(CONFIG, string='Train')
@@ -58,62 +63,79 @@ def main(CONFIG: DictConfig) -> None:
     dataset.transform = None
     test_dataset.transform = None
 
+    best_threshold, best_lambda = None, None
     idx_outer_fold = 0
-    for outer_train, outer_val in KFold(n_splits=10).split(range(len(dataset))):
+    best_model_outer, best_model_top1_acc_outer = None, None
+    for outer_train, outer_val in KFold(n_splits=OUTER_KFOLD).split(range(len(dataset))):
         outer_fold_train_dataset, outer_fold_val_dataset = data.split_to_idxs(outer_train, outer_val, dataset)
         outer_fold_train_dataset.transform = None
         outer_fold_val_dataset.transform = None
 
-        idx_inner_fold = 0
-        best_model, best_model_top1_acc = None, None
-        for inner_train, inner_val in KFold(n_splits=3).split(range(len(dataset))):
-            inner_fold_train_dataset, inner_fold_val_dataset = data.split_to_idxs(inner_train,
-                                                                                  inner_val, outer_fold_train_dataset)
-            inner_fold_train_dataset.transform = None
-            inner_fold_val_dataset.transform = None
 
-            # build the simple CNN
-            # model = WRN_MODELS['SimpleColorCNN'](CONFIG.MODEL)
+        best_model_inner, best_model_top1_acc_inner = None, None
+        for search_idx in range(N_SEARCHES):
+            # optimization for:
+            # what thershold we need to have a confident label
+            CONFIG.EXPERIMENT.threshold = np.random.uniform(0.5, 0.99)
+            # what loss is added to the confident label (1 is default)
+            CONFIG.EXPERIMENT.lambda_unlabeled = np.random.uniform(0.5, 1)
 
-            # build wideresnet
-            model = WRN_MODELS[CONFIG.MODEL.name](CONFIG.MODEL)
+            idx_inner_fold = 0
+            best_model_random, best_model_top1_acc_random = None, None
+            for inner_train, inner_val in KFold(n_splits=INNER_KFOLD).split(range(len(dataset))):
+                inner_fold_train_dataset, inner_fold_val_dataset = data.split_to_idxs(inner_train,
+                                                                                      inner_val, outer_fold_train_dataset)
+                inner_fold_train_dataset.transform = None
+                inner_fold_val_dataset.transform = None
 
-            logger.info("[Model] Building model {}".format(CONFIG.MODEL.name))
+                # build the simple CNN
+                model = WRN_MODELS['SimpleColorCNN'](CONFIG.MODEL)
 
-            if CONFIG.EXPERIMENT.used_gpu:
-                device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-                model = model.to(device=device)
+                # build wideresnet
+                # model = WRN_MODELS[CONFIG.MODEL.name](CONFIG.MODEL)
 
-            experiment = EXPERIMENT[CONFIG.EXPERIMENT.name](
-                model, CONFIG.EXPERIMENT, cta)
+                logger.info("[Model] Building model {}".format(CONFIG.MODEL.name))
 
-            if cta:
-                labeled_training_dataset, unlabeled_training_dataset, valid_dataset, cta_dataset = data.vanilla_dataset_to_unlabeled(dataset)
-                experiment.cta_probe_loader(cta_dataset)
-            else:
-                labeled_training_dataset, unlabeled_training_dataset, valid_dataset = data.vanilla_dataset_to_unlabeled(dataset)
+                if CONFIG.EXPERIMENT.used_gpu:
+                    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+                    model = model.to(device=device)
 
-            experiment.labelled_loader(labeled_training_dataset)
-            if CONFIG.DATASET.loading_data != 'LOAD_ORIGINAL' and unlabeled_training_dataset != None:
-                experiment.unlabelled_loader(
-                    unlabeled_training_dataset, CONFIG.DATASET.mu)
-            experiment.validation_loader(valid_dataset)
-            experiment.fitting()
-            print("======= Training done =======")
-            logger.info("======= Training done =======")
-            experiment.test_loader(valid_dataset)
-            test_loss, top1_acc, top5_acc = experiment.testing()
-            print("======= Testing done =======")
-            logger.info("======= Testing done =======")
+                experiment = EXPERIMENT[CONFIG.EXPERIMENT.name](
+                    model, CONFIG.EXPERIMENT, cta)
 
-            if best_model is None or top1_acc > best_model_top1_acc:
-                best_model = model
-                best_model_top1_acc = top1_acc
+                if cta:
+                    labeled_training_dataset, unlabeled_training_dataset, valid_dataset, cta_dataset = data.vanilla_dataset_to_unlabeled(dataset)
+                    experiment.cta_probe_loader(cta_dataset)
+                else:
+                    labeled_training_dataset, unlabeled_training_dataset, valid_dataset = data.vanilla_dataset_to_unlabeled(dataset)
 
-            idx_inner_fold += 1
+                experiment.labelled_loader(labeled_training_dataset)
+                if CONFIG.DATASET.loading_data != 'LOAD_ORIGINAL' and unlabeled_training_dataset != None:
+                    experiment.unlabelled_loader(
+                        unlabeled_training_dataset, CONFIG.DATASET.mu)
+                experiment.validation_loader(valid_dataset)
+                experiment.fitting()
+                print("======= Training done =======")
+                logger.info("======= Training done =======")
+                experiment.test_loader(valid_dataset)
+                test_loss, top1_acc, top5_acc = experiment.testing()
+                print("======= Testing done =======")
+                logger.info("======= Testing done =======")
+
+                if best_model_random is None or top1_acc > best_model_top1_acc_random:
+                    best_model_random = model
+                    best_model_top1_acc_random = top1_acc
+                    best_threshold = CONFIG.EXPERIMENT.threshold
+                    best_lambda = CONFIG.EXPERIMENT.lambda_unlabeled
+
+                idx_inner_fold += 1
+
+            if best_model_inner is None or best_model_top1_acc_random > best_model_top1_acc_inner:
+                best_model_inner = best_model_random
+                best_model_top1_acc_inner = best_model_top1_acc_random
 
         experiment = EXPERIMENT[CONFIG.EXPERIMENT.name](
-            best_model, CONFIG.EXPERIMENT, cta)
+            best_model_inner, CONFIG.EXPERIMENT, cta)
 
         if cta:
             _, _, test_fold_dataset, cta_dataset = data.vanilla_dataset_to_unlabeled(
@@ -131,6 +153,14 @@ def main(CONFIG: DictConfig) -> None:
         logger.info(f'test loss: {test_loss}, top1 acc: {top1_acc}, top5 acc: {top5_acc}')
 
         idx_outer_fold += 1
+
+        if best_model_outer is None or best_model_top1_acc_inner > best_model_top1_acc_outer:
+            best_model_outer = best_model_inner
+            best_model_top1_acc_outer = best_model_top1_acc_inner
+
+    # TODO: COMPUTE METRICS ON THE BEST MODEL
+    print(f'best threshold: {best_threshold}')
+    print(f'best lambda: {best_lambda}')
 
 
 if __name__ == '__main__':
