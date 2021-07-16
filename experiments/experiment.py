@@ -6,7 +6,6 @@ from os.path import exists
 from os import mkdir
 import logging
 
-
 import torch
 from torch import optim
 from torch.optim.lr_scheduler import LambdaLR
@@ -14,10 +13,11 @@ from torch.utils.data import DataLoader
 import torch.nn.functional as F
 from tensorboardX import SummaryWriter
 
-from utils.utils import accuracy,AverageMeter, save_cfmatrix, nl_loss
+from utils.utils import accuracy, AverageMeter, save_cfmatrix, nl_loss
 from utils.ema import EMA
 from datasets.datasets1 import BatchWeightedRandomSampler, DataSetForLoader
 from augmentations.ctaugment import deserialize
+
 
 def get_cosine_schedule_with_warmup(optimizer,
                                     num_warmup_steps,
@@ -35,29 +35,33 @@ def get_cosine_schedule_with_warmup(optimizer,
         Return:
             :obj:`torch.optim.lr_scheduler.LambdaLR` with the appropriate schedule.
     """
+
     def _lr_lambda(current_step):
         if current_step < num_warmup_steps:
             return float(current_step) / float(max(1, num_warmup_steps))
         no_progress = float(current_step - num_warmup_steps) / \
                       float(max(1, num_training_steps - num_warmup_steps))
         return max(0., math.cos(math.pi * num_cycles * no_progress))  # this is correct
+
     return LambdaLR(optimizer, _lr_lambda, last_epoch)
+
 
 class NegEntropy(object):
     ### Import from https://github.com/LiJunnan1992/DivideMix/blob/d9d3058fa69a952463b896f84730378cdee6ec39/Train_cifar.py#L205
     def __init__(self, equal_freq=False):
-        
+
         if equal_freq:
-            self.loss_func = lambda x: torch.sum((torch.mean(x, dim=0)+1e-5).log()* x)
+            self.loss_func = lambda x: torch.sum((torch.mean(x, dim=0) + 1e-5).log() * x)
         else:
-            self.loss_func = lambda x: torch.mean(torch.sum((x+1e-5).log()*x, dim=1)) 
+            self.loss_func = lambda x: torch.mean(torch.sum((x + 1e-5).log() * x, dim=1))
 
-
-    def __call__(self,outputs, ):
+    def __call__(self, outputs, ):
         probs = torch.softmax(outputs, dim=1)
         return self.loss_func(probs)
 
+
 logger = logging.getLogger(__name__)
+
 
 class FMExperiment(object):
     def __init__(self, wideresnet, params, cta=None):
@@ -83,7 +87,7 @@ class FMExperiment(object):
         warmup_steps = self.params.warmup * per_epoch_steps
         self.scheduler = get_cosine_schedule_with_warmup(self.optimizer, warmup_steps, total_training_steps)
 
-        #save log
+        # save log
         self.summary_logdir = os.path.join(self.params.log_path, 'summaries')
 
         # used Gpu or not
@@ -102,13 +106,13 @@ class FMExperiment(object):
     def forward(self, input):
         return self.model(input)
 
-    def update_cta(self, data): 
-        (cta_imgs, policies), cat_targets = data # labeled
+    def update_cta(self, data):
+        (cta_imgs, policies), cat_targets = data  # labeled
         if self.ema:
             model = self.ema_model
         else:
             model = self.model
-        self.model.eval() # 
+        self.model.eval()  #
         with torch.no_grad():
             cta_imgs = cta_imgs.to(self.device)
             logits = self.forward(cta_imgs)
@@ -120,26 +124,24 @@ class FMExperiment(object):
                 self.cta.update_rates(policy, 1.0 - 0.5 * prob.item())
         self.model.train()
 
-
-
     def train_step(self):
         logger.info("***** Running training *****")
         start = time.time()
         batch_time_meter = AverageMeter()
         train_losses_meter = AverageMeter()
         labelled_losses_meter = AverageMeter()
-        unlabeled_losses_meter = AverageMeter() # pseudo loss for unlabeled data with strong augmentation
+        unlabeled_losses_meter = AverageMeter()  # pseudo loss for unlabeled data with strong augmentation
         mask_meter = AverageMeter()
 
         # path for saving confusion matrix
-        now = int(round(time.time()*1000))
-        now = time.strftime('%Y-%m-%d_%H:%M:%S',time.localtime(now/1000))
-        save_to = self.params.log_path + '/%s_'%now
+        now = int(round(time.time() * 1000))
+        now = time.strftime('%Y-%m-%d_%H:%M:%S', time.localtime(now / 1000))
+        save_to = self.params.log_path + '/%s_' % now
 
         #### optional value cal
-        unlabeled_losses_real_strong_meter = AverageMeter()# real loss for unlabeled data with strong augmentation
-        corrrect_unlabeled_num_meter = AverageMeter()#Num of Correct Predicted for Unlabelled data
-        pro_above_threshold_num_meter = AverageMeter()#Num of gradient-included Unlabelled data
+        unlabeled_losses_real_strong_meter = AverageMeter()  # real loss for unlabeled data with strong augmentation
+        corrrect_unlabeled_num_meter = AverageMeter()  # Num of Correct Predicted for Unlabelled data
+        pro_above_threshold_num_meter = AverageMeter()  # Num of gradient-included Unlabelled data
         unlabelled_weak_top1_acc_meter = AverageMeter()
         unlabelled_weak_top5_acc_meter = AverageMeter()
 
@@ -150,7 +152,7 @@ class FMExperiment(object):
         self.model.train()
         for batch_idx, (data_labelled, data_unlabelled) in enumerate(train_loader):
 
-            if batch_idx > 2:
+            if batch_idx > 10:
                 break
 
             inputs_labelled, targets_labelled = data_labelled
@@ -158,10 +160,10 @@ class FMExperiment(object):
             # print('targets_labeled\n', [targets_labelled[np.where(targets_labelled==i)].shape for i in range(10)])
             # print('targets_unlabelled\n', [targets_unlabelled[np.where(targets_unlabelled==i)].shape for i in range(10)])
             if self.used_gpu:
-                inputs_labelled = inputs_labelled.to(device = self.device)
+                inputs_labelled = inputs_labelled.to(device=self.device)
                 targets_labelled = targets_labelled.to(device=self.device)
-                inputs_unlabelled_weak = inputs_unlabelled_weak.to(device = self.device)
-                inputs_unlabelled_strong = inputs_unlabelled_strong.to(device = self.device)
+                inputs_unlabelled_weak = inputs_unlabelled_weak.to(device=self.device)
+                inputs_unlabelled_strong = inputs_unlabelled_strong.to(device=self.device)
                 targets_unlabelled = targets_unlabelled.to(device=self.device)
 
             batch_size = inputs_labelled.shape[0]
@@ -176,25 +178,33 @@ class FMExperiment(object):
 
             # compute pseudo label for unlabeled data with weak augmentations
             outputs_labelled_weak_pro = torch.softmax(outputs_unlabelled_weak.detach(), dim=-1)
-            scores, pseudo_label = torch.max(outputs_labelled_weak_pro, dim=-1)
-            mask = scores.ge(self.params.threshold).float()
+            if self.params.is_suggested_improvement:
+                scores, pseudo_label = torch.topk(outputs_labelled_weak_pro, 2, dim=-1)
+                proportion = scores[:, 0] / scores[:, 1]
+                pseudo_label = pseudo_label[:, 0]
+                mask = proportion.ge(self.params.proportion_threshold).float()
+
+            else:
+                scores, pseudo_label = torch.max(outputs_labelled_weak_pro, dim=-1)
+                mask = scores.ge(self.params.threshold).float()
 
             # compute loss for labelled data,unlabeled data,total loss
             loss_labelled = F.cross_entropy(outputs_labelled, targets_labelled, reduction='mean')
-            
+
             if self.params.use_nlloss:
-                n_class = targets_labelled.max()+1
-                loss_unlabelled = nl_loss(outputs_unlabelled_strong, F.one_hot(pseudo_label, num_classes=n_class), self.params.q)
-                # loss_unlabelled_ce = F.cross_entropy(outputs_unlabelled_strong, pseudo_label,reduction='none')  
-            else: 
-                loss_unlabelled = F.cross_entropy(outputs_unlabelled_strong, pseudo_label,reduction='none')  
+                n_class = targets_labelled.max() + 1
+                loss_unlabelled = nl_loss(outputs_unlabelled_strong, F.one_hot(pseudo_label, num_classes=n_class),
+                                          self.params.q)
+                # loss_unlabelled_ce = F.cross_entropy(outputs_unlabelled_strong, pseudo_label,reduction='none')
+            else:
+                loss_unlabelled = F.cross_entropy(outputs_unlabelled_strong, pseudo_label, reduction='none')
 
             loss_unlabelled_guess = (loss_unlabelled * mask).mean()
             loss = loss_labelled + self.params.lambda_unlabeled * loss_unlabelled_guess
             if self.params.neg_penalty:
-                penalty = self.conf_penalty(outputs_labelled) ## for labelled data
+                penalty = self.conf_penalty(outputs_labelled)  ## for labelled data
                 if self.params.eta_dynamic:
-                    t = math.cos((math.pi * 7. * self.optimizer._step_count) / (16.*1024 * self.params.epoch_n))
+                    t = math.cos((math.pi * 7. * self.optimizer._step_count) / (16. * 1024 * self.params.epoch_n))
                 else:
                     t = 1
                 loss = loss + self.params.eta_negpenalty * t * penalty
@@ -223,7 +233,7 @@ class FMExperiment(object):
             # numbers of predicted pro above threshold
             pro_above_threshold_num = mask.sum()
             # pseudo label accuracy are cal without threshold
-            weak_top1_acc,weak_top5_acc = accuracy(outputs_unlabelled_weak,targets_unlabelled, topk=(1,5))
+            weak_top1_acc, weak_top5_acc = accuracy(outputs_unlabelled_weak, targets_unlabelled, topk=(1, 5))
 
             ############ update recording #################
             train_losses_meter.update(loss.item())
@@ -238,18 +248,21 @@ class FMExperiment(object):
             unlabelled_weak_top5_acc_meter.update(weak_top5_acc.item())
             batch_time_meter.update(time.time() - start)
 
+            print(f'going done batch {batch_idx}')
+
             # save confusion matrix every 100 steps
-            if self.save_cfmatrix and batch_idx % self.params.save_matrix_every == 0: #                 
+            if self.save_cfmatrix and batch_idx % self.params.save_matrix_every == 0:  #
                 outputs_labelled = torch.argmax(outputs_labelled, dim=-1)
-                save_cfmatrix(outputs_labelled, pseudo_label, mask, targets_labelled, targets_unlabelled, save_to=save_to, comment='step%d'%batch_idx)
+                save_cfmatrix(outputs_labelled, pseudo_label, mask, targets_labelled, targets_unlabelled,
+                              save_to=save_to, comment='step%d' % batch_idx)
 
         # updating ema model (buffer)
         if self.ema:
             self.ema_model.update_buffer()
             logger.info("[EMA] update buffer()")
 
-        return train_losses_meter.avg,labelled_losses_meter.avg,unlabeled_losses_meter.avg,mask_meter.avg,unlabeled_losses_real_strong_meter.avg,\
-               corrrect_unlabeled_num_meter.sum,pro_above_threshold_num_meter.sum,unlabelled_weak_top1_acc_meter.avg,unlabelled_weak_top5_acc_meter.avg
+        return train_losses_meter.avg, labelled_losses_meter.avg, unlabeled_losses_meter.avg, mask_meter.avg, unlabeled_losses_real_strong_meter.avg, \
+               corrrect_unlabeled_num_meter.sum, pro_above_threshold_num_meter.sum, unlabelled_weak_top1_acc_meter.avg, unlabelled_weak_top5_acc_meter.avg
 
     def test_step(self):
         logger.info("***** Running testing *****")
@@ -275,7 +288,7 @@ class FMExperiment(object):
                 top5_meter.update(acc5.item(), inputs.shape[0])
                 batch_time_meter.update(time.time() - start)
 
-        return test_losses_meter.avg,top1_meter.avg,top5_meter.avg
+        return test_losses_meter.avg, top1_meter.avg, top5_meter.avg
 
     def validation_step(self):
         logger.info("***** Running validation *****")
@@ -300,8 +313,7 @@ class FMExperiment(object):
                 top1_meter.update(acc1.item(), inputs.shape[0])
                 top5_meter.update(acc5.item(), inputs.shape[0])
                 batch_time_meter.update(time.time() - start)
-        return valid_losses_meter.avg,top1_meter.avg,top5_meter.avg
-
+        return valid_losses_meter.avg, top1_meter.avg, top5_meter.avg
 
     def testing(self):
         # apply shadow model
@@ -312,10 +324,12 @@ class FMExperiment(object):
         test_loss, top1_acc, top5_acc = self.test_step()
         if self.ema:
             logger.info(
-                "[Testing(EMA)] testing_loss: {:.4f}, test Top1 acc:{}, test Top5 acc: {}".format(test_loss,top1_acc,top5_acc))
+                "[Testing(EMA)] testing_loss: {:.4f}, test Top1 acc:{}, test Top5 acc: {}".format(test_loss, top1_acc,
+                                                                                                  top5_acc))
         else:
             logger.info(
-            "[Testing] testing_loss: {:.4f}, test Top1 acc:{}, test Top5 acc: {}".format(test_loss,top1_acc,top5_acc))
+                "[Testing] testing_loss: {:.4f}, test Top1 acc:{}, test Top5 acc: {}".format(test_loss, top1_acc,
+                                                                                             top5_acc))
 
         # restore the params
         if self.ema:
@@ -336,18 +350,20 @@ class FMExperiment(object):
 
         prev_lr = np.inf
         for epoch_idx in range(start_epoch, self.params.epoch_n):
-            if self.params.save_cfmatrix and (epoch_idx % self.params.save_matrix_every == 0 or epoch_idx == self.params.epoch_n-1):
+            if self.params.save_cfmatrix and (
+                    epoch_idx % self.params.save_matrix_every == 0 or epoch_idx == self.params.epoch_n - 1):
                 self.save_cfmatrix = True
-            else: self.save_cfmatrix = False
+            else:
+                self.save_cfmatrix = False
 
             # turn on training
             start = time.time()
-            train_loss,labelled_loss,unlabeled_loss,mask,unlabeled_losses_real_strong,\
-               corrrect_unlabeled_num,pro_above_threshold_num,unlabelled_weak_top1_acc,unlabelled_weak_top5_acc = self.train_step()
+            train_loss, labelled_loss, unlabeled_loss, mask, unlabeled_losses_real_strong, \
+            corrrect_unlabeled_num, pro_above_threshold_num, unlabelled_weak_top1_acc, unlabelled_weak_top5_acc = self.train_step()
             end = time.time()
             print("epoch {}: use {} seconds".format(epoch_idx, end - start))
 
-            cur_lr = self.optimizer.param_groups[0]['lr'] # self.scheduler.get_last_lr()[0]
+            cur_lr = self.optimizer.param_groups[0]['lr']  # self.scheduler.get_last_lr()[0]
             if cur_lr != prev_lr:
                 print('--- Optimizer learning rate changed from %.2e to %.2e ---' % (prev_lr, cur_lr))
                 prev_lr = cur_lr
@@ -361,7 +377,7 @@ class FMExperiment(object):
                 logger.info("[EMA] apply shadow")
 
                 # testing
-                ema_test_loss, ema_top1_acc, ema_top5_acc= self.validation_step()
+                ema_test_loss, ema_top1_acc, ema_top5_acc = self.validation_step()
 
                 # restore the params
                 self.ema_model.restore()
@@ -371,8 +387,10 @@ class FMExperiment(object):
             self.swriter.add_scalars('train/lr', {'Current Lr': cur_lr}, epoch_idx)
             self.swriter.add_scalars('test/accuracy', {'Top1': raw_top1_acc, 'Top5': raw_top5_acc}, epoch_idx)
             if self.ema:
-                self.swriter.add_scalars('train/loss', {'train_loss': train_loss, 'raw_test_loss': raw_test_loss,}, epoch_idx)
-                self.swriter.add_scalars('train_w_ema/loss', {'train_loss': train_loss, 'ema_test_loss': ema_test_loss}, epoch_idx)
+                self.swriter.add_scalars('train/loss', {'train_loss': train_loss, 'raw_test_loss': raw_test_loss, },
+                                         epoch_idx)
+                self.swriter.add_scalars('train_w_ema/loss', {'train_loss': train_loss, 'ema_test_loss': ema_test_loss},
+                                         epoch_idx)
                 self.swriter.add_scalars('test_w_ema/accuracy', {'Top1': ema_top1_acc, 'Top5': ema_top5_acc}, epoch_idx)
                 logger.info("[EMA] Epoch {}.[Train] time:{} seconds, lr:{:.4f}, train_loss: {:.4f}, "
                             "unlabeled_losses_real_strong:{:.4f},corrrect_unlabeled_num:{},pro_above_threshold_num:{},"
@@ -385,19 +403,27 @@ class FMExperiment(object):
                                                                                                unlabelled_weak_top5_acc))
                 logger.info(
                     "[EMA] Epoch {}. [Validation] raw_testing_loss: {:.4f}, raw test Top1 acc:{}, raw test Top5 acc: {}, ema_testing_loss: {:.4f}, ema test Top1 acc:{}, ema test Top5 acc: {}".format(
-                        epoch_idx, raw_test_loss, raw_top1_acc, raw_top5_acc, ema_test_loss, ema_top1_acc, ema_top5_acc))
+                        epoch_idx, raw_test_loss, raw_top1_acc, raw_top5_acc, ema_test_loss, ema_top1_acc,
+                        ema_top5_acc))
 
-            else:   # if ema is not used ; save the infor without ema
-                self.swriter.add_scalars('train/loss', {'train_loss': train_loss, 'test_loss': raw_test_loss,}, epoch_idx)
+            else:  # if ema is not used ; save the infor without ema
+                self.swriter.add_scalars('train/loss', {'train_loss': train_loss, 'test_loss': raw_test_loss, },
+                                         epoch_idx)
                 logger.info(
                     "[no EMA] Epoch {}. [Train] time:{} seconds, lr:{:.4f}, "
                     "train_loss: {:.4f}, unlabeled_losses_real_strong:{:.4f},"
                     "corrrect_unlabeled_num:{},pro_above_threshold_num:{},"
-                    "unlabelled_weak_top1_acc:{},unlabelled_weak_top5_acc:{}  ".format(epoch_idx, end - start, cur_lr, train_loss,
-                                 unlabeled_losses_real_strong, corrrect_unlabeled_num,pro_above_threshold_num,unlabelled_weak_top1_acc,unlabelled_weak_top5_acc))
-                logger.info("[no EMA] Epoch {}. [Validation] testing_loss: {:.4f}, test Top1 acc:{}, test Top5 acc: {}".format(epoch_idx,
+                    "unlabelled_weak_top1_acc:{},unlabelled_weak_top5_acc:{}  ".format(epoch_idx, end - start, cur_lr,
+                                                                                       train_loss,
+                                                                                       unlabeled_losses_real_strong,
+                                                                                       corrrect_unlabeled_num,
+                                                                                       pro_above_threshold_num,
+                                                                                       unlabelled_weak_top1_acc,
+                                                                                       unlabelled_weak_top5_acc))
+                logger.info(
+                    "[no EMA] Epoch {}. [Validation] testing_loss: {:.4f}, test Top1 acc:{}, test Top5 acc: {}".format(
+                        epoch_idx,
                         raw_test_loss, raw_top1_acc, raw_top5_acc))
-
 
             # saving model
             if epoch_idx == 0 or (epoch_idx + 1) % self.params.save_every == 0:
@@ -417,65 +443,69 @@ class FMExperiment(object):
         self.num_train = len(labelled_training_dataset)
         if self.params.batch_balanced:
             kwargs = dict(
-                batch_sampler= BatchWeightedRandomSampler(labelled_training_dataset, batch_size=self.params.batch_size) if self.params.batch_balanced else None,
+                batch_sampler=BatchWeightedRandomSampler(labelled_training_dataset,
+                                                         batch_size=self.params.batch_size) if self.params.batch_balanced else None,
             )
-        else: 
-            kwargs =dict(
+        else:
+            kwargs = dict(
                 batch_size=self.params.batch_size,
                 shuffle=True,
                 drop_last=True
             )
-        self.labelled_loader = DataLoader(labelled_training_dataset, num_workers=self.params.num_workers, pin_memory=True, **kwargs)
+        self.labelled_loader = DataLoader(labelled_training_dataset, num_workers=self.params.num_workers,
+                                          pin_memory=True, **kwargs)
         logger.info("Loading Labelled Loader")
         return
 
-    def unlabelled_loader(self,unlabelled_training_dataset, mu):
+    def unlabelled_loader(self, unlabelled_training_dataset, mu):
         self.num_valid = len(unlabelled_training_dataset)
         if self.params.batch_balanced:
             kwargs = dict(
-                batch_sampler= BatchWeightedRandomSampler(unlabelled_training_dataset, batch_size=self.params.batch_size * mu) if self.params.batch_balanced else None,
+                batch_sampler=BatchWeightedRandomSampler(unlabelled_training_dataset,
+                                                         batch_size=self.params.batch_size * mu) if self.params.batch_balanced else None,
             )
-        else: 
-            kwargs =dict(
+        else:
+            kwargs = dict(
                 batch_size=self.params.batch_size * mu,
                 shuffle=True,
                 drop_last=True,
             )
-        self.unlabelled_loader = DataLoader(unlabelled_training_dataset, num_workers=self.params.num_workers, pin_memory=True, **kwargs)
+        self.unlabelled_loader = DataLoader(unlabelled_training_dataset, num_workers=self.params.num_workers,
+                                            pin_memory=True, **kwargs)
         logger.info("Loading Unlabelled Loader")
         return
 
-    def validation_loader(self,valid_dataset):
-        self.num_valid_imgs = len(valid_dataset) # same as len(dataloader)
+    def validation_loader(self, valid_dataset):
+        self.num_valid_imgs = len(valid_dataset)  # same as len(dataloader)
         self.valid_dataloader = DataLoader(valid_dataset,
+                                           batch_size=self.params.batch_size,
+                                           shuffle=False,
+                                           drop_last=False,
+                                           num_workers=self.params.num_workers,
+                                           pin_memory=True)
+        logger.info("Loading Validation Loader")
+        return
+
+    def test_loader(self, test_dataset):
+        self.num_test_imgs = len(test_dataset)  # same as len(dataloader)
+        self.test_dataloader = DataLoader(test_dataset,
                                           batch_size=self.params.batch_size,
                                           shuffle=False,
                                           drop_last=False,
                                           num_workers=self.params.num_workers,
-                                          pin_memory=True)
-        logger.info("Loading Validation Loader")
-        return
-
-    def test_loader(self,test_dataset):
-        self.num_test_imgs = len(test_dataset) # same as len(dataloader)
-        self.test_dataloader = DataLoader(test_dataset,
-                                          batch_size=self.params.batch_size,
-                                          shuffle=False,
-                                          drop_last=False, 
-                                          num_workers=self.params.num_workers, 
                                           pin_memory=True)
         logger.info("Loading Testing Loader")
         return
 
     def cta_probe_loader(self, cta_probe_dataset):
         self.cta_probe_dataloader = DataLoader(cta_probe_dataset,
-                                          batch_size=self.params.batch_size,
-                                          shuffle=False,
-                                          drop_last=False, 
-                                          num_workers=self.params.num_workers, 
-                                          pin_memory=True)
+                                               batch_size=self.params.batch_size,
+                                               shuffle=False,
+                                               drop_last=False,
+                                               num_workers=self.params.num_workers,
+                                               pin_memory=True)
         logger.info("Loading cta probe Loader")
-        return 
+        return
 
     def load_model(self, mdl_fname, cuda=False):
         if self.used_gpu:
@@ -512,20 +542,23 @@ class FMExperiment(object):
                     self.ema_model.load_state_dict(checkpoint['ema_state_dict'])
                 elif self.ema:
                     self.ema_model.load_state_dict(checkpoint['state_dict'])
-                print("=> loaded checkpoint '{}' (epoch {})".format(self.params.resume_checkpoints, checkpoint['epoch']))
-                logger.info("=> loaded checkpoint '{}' (epoch {})".format(self.params.resume_checkpoints, checkpoint['epoch']))
+                print(
+                    "=> loaded checkpoint '{}' (epoch {})".format(self.params.resume_checkpoints, checkpoint['epoch']))
+                logger.info(
+                    "=> loaded checkpoint '{}' (epoch {})".format(self.params.resume_checkpoints, checkpoint['epoch']))
             else:
                 print("=> no checkpoint found at '{}'".format(self.params.resume_checkpoints))
                 logger.info("=> no checkpoint found at '{}'".format(self.params.resume_checkpoints))
         return start_epoch
 
-    def save_checkpoint(self,state, epoch_idx):
+    def save_checkpoint(self, state, epoch_idx):
         saving_checkpoint_file_folder = os.path.join(self.params.out_model, self.params.log_path.split('/')[-1])
         if not exists(saving_checkpoint_file_folder):
             mkdir(saving_checkpoint_file_folder)
-        filename = os.path.join(saving_checkpoint_file_folder,'{}_epoch_{}.pth.tar'.format(self.params.name, epoch_idx))
+        filename = os.path.join(saving_checkpoint_file_folder,
+                                '{}_epoch_{}.pth.tar'.format(self.params.name, epoch_idx))
         torch.save(state, filename)
         logger.info("[Checkpoints] Epoch {}, saving to {}".format(state['epoch'], filename))
 
 # def end_writer(self):
-    #     self.swriter.close()
+#     self.swriter.close()

@@ -58,6 +58,9 @@ EXPERIMENT:
   use_nlloss: False
   q: 0.0001  # hyperparameter for noisy label loss
 
+  is_suggested_improvement: 0
+  proportion_threshold: 2.5
+
 Logging:
   name: "FM"
   seed: 1265                    #---- None ---
