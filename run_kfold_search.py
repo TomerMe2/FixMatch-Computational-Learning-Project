@@ -59,14 +59,14 @@ def main(CONFIG: DictConfig) -> None:
     test_dataset.transform = None
 
     idx_outer_fold = 0
-    for outer_train, outer_val in KFold(n_splits=3).split(range(len(dataset))):
+    for outer_train, outer_val in KFold(n_splits=10).split(range(len(dataset))):
         outer_fold_train_dataset, outer_fold_val_dataset = data.split_to_idxs(outer_train, outer_val, dataset)
         outer_fold_train_dataset.transform = None
         outer_fold_val_dataset.transform = None
 
         idx_inner_fold = 0
         best_model, best_model_top1_acc = None, None
-        for inner_train, inner_val in KFold(n_splits=10).split(range(len(dataset))):
+        for inner_train, inner_val in KFold(n_splits=3).split(range(len(dataset))):
             inner_fold_train_dataset, inner_fold_val_dataset = data.split_to_idxs(inner_train,
                                                                                   inner_val, outer_fold_train_dataset)
             inner_fold_train_dataset.transform = None
