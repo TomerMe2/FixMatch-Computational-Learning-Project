@@ -150,7 +150,7 @@ class FMExperiment(object):
         self.model.train()
         for batch_idx, (data_labelled, data_unlabelled) in enumerate(train_loader):
 
-            if batch_idx > 10:
+            if batch_idx > 2:
                 break
 
             inputs_labelled, targets_labelled = data_labelled
@@ -237,8 +237,6 @@ class FMExperiment(object):
             unlabelled_weak_top1_acc_meter.update(weak_top1_acc.item())
             unlabelled_weak_top5_acc_meter.update(weak_top5_acc.item())
             batch_time_meter.update(time.time() - start)
-
-            print(f'going done batch {batch_idx}')
 
             # save confusion matrix every 100 steps
             if self.save_cfmatrix and batch_idx % self.params.save_matrix_every == 0: #                 
@@ -460,7 +458,7 @@ class FMExperiment(object):
 
     def test_loader(self,test_dataset):
         self.num_test_imgs = len(test_dataset) # same as len(dataloader)
-        self.test_dataloader = DataLoader(DataSetForLoader(test_dataset),
+        self.test_dataloader = DataLoader(test_dataset,
                                           batch_size=self.params.batch_size,
                                           shuffle=False,
                                           drop_last=False, 

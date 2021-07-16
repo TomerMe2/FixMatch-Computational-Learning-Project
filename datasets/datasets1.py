@@ -67,16 +67,15 @@ class CombineDataset(Dataset):
 
 
 class SubsetDataset(Dataset):
-    def __init__(self, subset, transform, target_transform):
+    def __init__(self, dataset, indices_to_keep, transform, target_transform):
         super(SubsetDataset, self).__init__()
 
-        self.subset = subset
         self.targets = []
         self.data = []
 
-        for x, y in subset:
-            self.data.append(x)
-            self.targets.append(y)
+        for i in indices_to_keep:
+            self.data.append(dataset.data[i])
+            self.targets.append(dataset.targets[i])
 
         self.transform = transform
         self.target_transform = target_transform
@@ -89,7 +88,21 @@ class SubsetDataset(Dataset):
         Returns:
             tuple: (image, target) where target is index of the target class.
         """
-        return self.data[index], self.targets[index]
+        # return self.data[index], self.targets[index]
+
+        img, target = self.data[index], self.targets[index]
+
+        # doing this so that it is consistent with all other datasets
+        # to return a PIL Image
+        img = Image.fromarray(img)
+
+        if self.transform is not None:
+            img = self.transform(img)
+
+        if self.target_transform is not None:
+            target = self.target_transform(target)
+
+        return img, target
 
     def __len__(self) -> int:
         return len(self.subset)
@@ -122,6 +135,7 @@ class DataSetForLoader(Dataset):
 
 
 class KFoldDataset:
+    # TODO: BUGGY. CHANGE.
     def __init__(self, dataset_to_kfold, k):
         super(KFoldDataset, self).__init__()
         self.transform = dataset_to_kfold.transform
@@ -188,6 +202,8 @@ class LoadDataset_Label_Unlabel(object):
         return train_set, test_set
 
     def split_to_idxs(self, idxs_train, idxs_test, dataset):
+        #train_set = SubsetDataset(dataset, idxs_train, dataset.transform, dataset.target_transform)
+        #test_set = SubsetDataset(dataset, idxs_test, dataset.transform, dataset.target_transform)
         train_set, _, test_set = self.apply_transform(idxs_train, [], idxs_test, dataset)
         return train_set, test_set
 
@@ -510,7 +526,10 @@ class TransformedDataset(Dataset):
         #     self.dataset.targets = np.array(self.dataset.targets)[indexs]
 
     def __getitem__(self, i):
-        img, target = self.dataset[self.indexs[i]]
+        if self.indexs is not None:
+            img, target = self.dataset[self.indexs[i]]
+        else:
+            img, target = self.dataset[i]
 
         if self.transform is not None:
             img = self.transform(img)

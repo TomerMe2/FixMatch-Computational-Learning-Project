@@ -5,18 +5,15 @@ import numpy as np
 import torch
 import torch.backends.cudnn as cudnn
 from easydict import EasyDict as edict
-from sklearn.model_selection import KFold
+
 from omegaconf import DictConfig, OmegaConf
 import hydra
-from torch.utils.data import ConcatDataset
+from sklearn.model_selection import KFold
 
 from datasets import *
 from models import *
 from experiments import *
 from utils.utils import setup_default_logging
-
-K_OUTER_FOLD = 3
-K_INNER_FOLD = 10
 
 
 @hydra.main(config_path='./config', config_name='config')
@@ -57,27 +54,31 @@ def main(CONFIG: DictConfig) -> None:
 
     cta = data.get_cta() if CONFIG.DATASET.strongaugment == 'CTA' else None
 
-    logger.info("[Model] Building model {}".format(CONFIG.MODEL.name))
-
-    trainset, testset = data.get_vanila_dataset()
+    dataset, test_dataset = data.get_vanila_dataset()
+    dataset.transform = None
+    test_dataset.transform = None
 
     idx_outer_fold = 0
-    for outer_train, outer_val in KFold(n_splits=K_OUTER_FOLD).split(range(len(trainset))):
-        outer_fold_train_dataset, outer_fold_val_dataset = data.split_to_idxs(outer_train, outer_val, trainset)
+    for outer_train, outer_val in KFold(n_splits=3).split(range(len(dataset))):
+        outer_fold_train_dataset, outer_fold_val_dataset = data.split_to_idxs(outer_train, outer_val, dataset)
+        outer_fold_train_dataset.transform = None
+        outer_fold_val_dataset.transform = None
 
-        best_model, best_model_top1_acc = None, None
         idx_inner_fold = 0
-        for inner_train, inner_val in KFold(n_splits=K_INNER_FOLD).split(range(len(outer_fold_train_dataset))):
+        best_model, best_model_top1_acc = None, None
+        for inner_train, inner_val in KFold(n_splits=10).split(range(len(dataset))):
             inner_fold_train_dataset, inner_fold_val_dataset = data.split_to_idxs(inner_train,
                                                                                   inner_val, outer_fold_train_dataset)
-
-            print(f'Entering inner fold {idx_inner_fold}')
+            inner_fold_train_dataset.transform = None
+            inner_fold_val_dataset.transform = None
 
             # build the simple CNN
             # model = WRN_MODELS['SimpleColorCNN'](CONFIG.MODEL)
 
             # build wideresnet
             model = WRN_MODELS[CONFIG.MODEL.name](CONFIG.MODEL)
+
+            logger.info("[Model] Building model {}".format(CONFIG.MODEL.name))
 
             if CONFIG.EXPERIMENT.used_gpu:
                 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -87,9 +88,10 @@ def main(CONFIG: DictConfig) -> None:
                 model, CONFIG.EXPERIMENT, cta)
 
             if cta:
-                labeled_training_dataset, unlabeled_training_dataset, valid_dataset, cta_dataset = data.vanilla_dataset_to_unlabeled(inner_fold_train_dataset)
+                labeled_training_dataset, unlabeled_training_dataset, valid_dataset, cta_dataset = data.vanilla_dataset_to_unlabeled(dataset)
+                experiment.cta_probe_loader(cta_dataset)
             else:
-                labeled_training_dataset, unlabeled_training_dataset, valid_dataset = data.vanilla_dataset_to_unlabeled(inner_fold_train_dataset)
+                labeled_training_dataset, unlabeled_training_dataset, valid_dataset = data.vanilla_dataset_to_unlabeled(dataset)
 
             experiment.labelled_loader(labeled_training_dataset)
             if CONFIG.DATASET.loading_data != 'LOAD_ORIGINAL' and unlabeled_training_dataset != None:
@@ -97,23 +99,38 @@ def main(CONFIG: DictConfig) -> None:
                     unlabeled_training_dataset, CONFIG.DATASET.mu)
             experiment.validation_loader(valid_dataset)
             experiment.fitting()
-            logger.info(f"======= Training done outer fold {idx_outer_fold} inner fold {idx_inner_fold} =======")
-            experiment.test_loader(inner_fold_val_dataset)
+            print("======= Training done =======")
+            logger.info("======= Training done =======")
+            experiment.test_loader(valid_dataset)
             test_loss, top1_acc, top5_acc = experiment.testing()
+            print("======= Testing done =======")
+            logger.info("======= Testing done =======")
 
             if best_model is None or top1_acc > best_model_top1_acc:
                 best_model = model
                 best_model_top1_acc = top1_acc
 
-            print(f'top1: {top1_acc}, top5: {top5_acc}')
-            logger.info("======= Validation done =======")
+            idx_inner_fold += 1
 
         experiment = EXPERIMENT[CONFIG.EXPERIMENT.name](
             best_model, CONFIG.EXPERIMENT, cta)
-        experiment.test_loader(outer_fold_val_dataset)
+
+        if cta:
+            _, _, test_fold_dataset, cta_dataset = data.vanilla_dataset_to_unlabeled(
+                dataset)
+            experiment.cta_probe_loader(cta_dataset)
+        else:
+            _, _, test_fold_dataset = data.vanilla_dataset_to_unlabeled(
+                dataset)
+
+        experiment.test_loader(test_fold_dataset)
+        print('======= Outer Fold Test ========')
+        logger.info('======= Outer Fold Test ========')
         test_loss, top1_acc, top5_acc = experiment.testing()
-        print(f'OUTER FOLD {idx_outer_fold} TEST')
-        print(f'top1: {top1_acc}, top5: {top5_acc}')
+        print(f'test loss: {test_loss}, top1 acc: {top1_acc}, top5 acc: {top5_acc}')
+        logger.info(f'test loss: {test_loss}, top1 acc: {top1_acc}, top5 acc: {top5_acc}')
+
+        idx_outer_fold += 1
 
 
 if __name__ == '__main__':
