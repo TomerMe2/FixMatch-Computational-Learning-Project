@@ -288,8 +288,8 @@ class FMExperiment(object):
                 loss = F.cross_entropy(outputs, targets)
                 acc1, acc5 = accuracy(outputs, targets, topk=(1, 5))
 
-                batch_y_true = targets.argmax()
-                batch_y_pred = outputs.argmax()
+                batch_y_true = targets.tolist()
+                batch_y_pred = outputs.argmax(axis=1).tolist()
 
                 y_true.extend(batch_y_true)
                 y_pred.extend(batch_y_pred)
@@ -329,16 +329,12 @@ class FMExperiment(object):
         tpr = TP / (TP + FN)
         # Fall out or false positive rate
         fpr = FP / (FP + TN)
-        # Precision or positive predictive value (PPV)
-        precision = TP / (TP + FP)
 
-        auc = metrics.auc(fpr, tpr)
-
-        pr, recall, thresholds = metrics.precision_recall_curve(y_true, y_pred_probas)
-        auc_precision_recall = metrics.auc(recall, pr)
+        precision = metrics.precision_score(y_true, y_pred, average='micro')
+        auc = metrics.roc_auc_score(y_true, y_pred_probas, multi_class='ovr')
 
         # return test_losses_meter.avg, top1_meter.avg, top5_meter.avg
-        return top1_meter.avg, tpr, fpr, precision, auc, auc_precision_recall, time_took_per_1k
+        return top1_meter.avg, np.mean(tpr), np.mean(fpr), precision, auc, time_took_per_1k
 
     def validation_step(self):
         logger.info("***** Running validation *****")
@@ -371,22 +367,14 @@ class FMExperiment(object):
             self.ema_model.apply_shadow()
             logger.info("[Testing with EMA] apply shadow")
 
-        test_loss, top1_acc, top5_acc = self.test_step()
-        if self.ema:
-            logger.info(
-                "[Testing(EMA)] testing_loss: {:.4f}, test Top1 acc:{}, test Top5 acc: {}".format(test_loss, top1_acc,
-                                                                                                  top5_acc))
-        else:
-            logger.info(
-                "[Testing] testing_loss: {:.4f}, test Top1 acc:{}, test Top5 acc: {}".format(test_loss, top1_acc,
-                                                                                             top5_acc))
+        mtrcs = self.test_step()
 
         # restore the params
         if self.ema:
             self.ema_model.restore()
             logger.info("[EMA] restore ")
 
-        return test_loss, top1_acc, top5_acc
+        return mtrcs
 
     def fitting(self):
         # initial tensorboard

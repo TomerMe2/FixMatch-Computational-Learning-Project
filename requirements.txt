@@ -13,3 +13,4 @@ torch==1.7.0
 torchaudio==0.7.0a0+ac17b64
 torchvision==0.8.1
 tqdm @ file:///tmp/build/80754af9/tqdm_1608922753628/work
+sklearn

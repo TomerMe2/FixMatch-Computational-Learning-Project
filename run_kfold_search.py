@@ -46,7 +46,7 @@ def main(CONFIG: DictConfig) -> None:
     logger.info(CONFIG)
 
     with open(CSV_LOG_PATH, 'a') as fd:
-        fd.write('acc,tpr,fpr,precision,auc,auc_precision_recall,training_time (s),time_took_per_1k (s)\n')
+        fd.write('dataset,algorithm_name,cross_validation,lambda,threshold,acc,tpr,fpr,precision,auc,training_time (s),time_took_per_1k (s)\n')
 
     # # For reproducibility, set random seed
     if CONFIG.Logging.seed == 'None':
@@ -68,7 +68,6 @@ def main(CONFIG: DictConfig) -> None:
     test_dataset.transform = None
 
     training_time = None
-    best_threshold, best_lambda = None, None
     idx_outer_fold = 0
     best_model_outer, best_model_top1_acc_outer = None, None
     for outer_train, outer_val in KFold(n_splits=OUTER_KFOLD).split(range(len(dataset))):
@@ -77,7 +76,8 @@ def main(CONFIG: DictConfig) -> None:
         outer_fold_val_dataset.transform = None
 
 
-        best_model_inner, best_model_top1_acc_inner, best_model_inner_metrics = None, None
+        best_model_inner, best_model_top1_acc_inner = None, None
+        best_threshold, best_lambda = None, None
         for search_idx in range(N_SEARCHES):
             # optimization for:
             # what thershold we need to have a confident label
@@ -163,9 +163,9 @@ def main(CONFIG: DictConfig) -> None:
         experiment.test_loader(test_fold_dataset)
         print('======= Outer Fold Test ========')
         logger.info('======= Outer Fold Test ========')
-        acc, tpr, fpr, precision, auc, auc_precision_recall, time_took_per_1k = experiment.testing()
+        acc, tpr, fpr, precision, auc, time_took_per_1k = experiment.testing()
 
-        to_write = f'{acc},{tpr},{fpr},{precision},{auc},{auc_precision_recall},{training_time},{time_took_per_1k}'
+        to_write = f'CIFAR10,FixMatch,{idx_outer_fold + 1},{best_lambda},{best_threshold},{acc},{tpr},{fpr},{precision},{auc},{training_time},{time_took_per_1k}'
         with open(CSV_LOG_PATH, 'a') as fd:
             fd.write(to_write + '\n')
 
