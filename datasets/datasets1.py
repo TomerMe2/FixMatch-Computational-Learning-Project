@@ -4,6 +4,7 @@ import sys
 from collections import defaultdict
 
 from torch.utils.data.sampler import Sampler
+import random
 
 sys.path.append(os.getcwd())
 from PIL import Image
@@ -174,6 +175,21 @@ class LoadDataset_Label_Unlabel(object):
 
     def get_cta(self):
         return self.strongaugment
+
+    def split_dataset(self, prob_for_train, dataset):
+        idxs = list(range(len(dataset)))
+        random.shuffle(idxs)
+
+        divider = int(len(dataset) * prob_for_train)
+        idxs_train = idxs[:divider]
+        idxs_test = idxs[divider:]
+
+        train_set, _, test_set = self.apply_transform(idxs_train, [], idxs_test, dataset)
+        return train_set, test_set
+
+    def split_to_idxs(self, idxs_train, idxs_test, dataset):
+        train_set, _, test_set = self.apply_transform(idxs_train, [], idxs_test, dataset)
+        return train_set, test_set
 
     def vanilla_dataset_to_unlabeled(self, dataset):
         self.num_classes = max(dataset.targets) + 1
@@ -482,6 +498,10 @@ class TransformFix(object):
 class TransformedDataset(Dataset):
     def __init__(self, dataset, indexs, transform, target_transform=None):
         self.dataset = dataset
+        try:
+            self.targets = dataset.targets
+        except:
+            pass
         self.transform = transform
         self.target_transform = target_transform
         self.indexs = indexs

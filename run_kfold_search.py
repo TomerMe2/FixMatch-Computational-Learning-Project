@@ -61,30 +61,17 @@ def main(CONFIG: DictConfig) -> None:
 
     trainset, testset = data.get_vanila_dataset()
 
-    num_train = len(trainset)
-    num_each_outer_fold = num_train // K_OUTER_FOLD
-    leftover_outer = num_train - num_each_outer_fold * K_OUTER_FOLD
+    idx_outer_fold = 0
+    for outer_train, outer_val in KFold(n_splits=K_OUTER_FOLD).split(range(len(trainset))):
+        outer_fold_train_dataset, outer_fold_val_dataset = data.split_to_idxs(outer_train, outer_val, trainset)
 
-    outer_folds = KFoldDataset(trainset, K_OUTER_FOLD).folds
-    #outer_folds = torch.utils.data.random_split(trainset, [num_each_outer_fold] * (K_OUTER_FOLD - 1) +
-    #                                            [num_each_outer_fold + leftover_outer])
-
-    for curr_outer_fold_idx in range(K_OUTER_FOLD):
-        print(f'Entering outer fold {curr_outer_fold_idx}')
-        # leave one out
-        outer_fold_train_dataset = CombineDataset([dtst for idx, dtst in enumerate(outer_folds) if idx != curr_outer_fold_idx])
-        outer_fold_val_dataset = outer_folds[curr_outer_fold_idx]
-
-        num_inner = len(outer_fold_train_dataset)
-        num_each_inner_fold = num_inner // K_INNER_FOLD
-        leftover_inner = num_inner - num_each_inner_fold * K_INNER_FOLD
-
-        #inner_folds = torch.utils.data.random_split(outer_fold_train_dataset, [num_each_inner_fold] * (K_INNER_FOLD - 1)
-        #                                            + [num_each_inner_fold + leftover_inner])
-        inner_folds = KFoldDataset(outer_fold_train_dataset, K_INNER_FOLD).folds
         best_model, best_model_top1_acc = None, None
-        for curr_inner_fold_idx in range(K_INNER_FOLD):
-            print(f'Entering inner fold {curr_inner_fold_idx}')
+        idx_inner_fold = 0
+        for inner_train, inner_val in KFold(n_splits=K_INNER_FOLD).split(range(len(outer_fold_train_dataset))):
+            inner_fold_train_dataset, inner_fold_val_dataset = data.split_to_idxs(inner_train,
+                                                                                  inner_val, outer_fold_train_dataset)
+
+            print(f'Entering inner fold {idx_inner_fold}')
 
             # build the simple CNN
             # model = WRN_MODELS['SimpleColorCNN'](CONFIG.MODEL)
@@ -99,9 +86,6 @@ def main(CONFIG: DictConfig) -> None:
             experiment = EXPERIMENT[CONFIG.EXPERIMENT.name](
                 model, CONFIG.EXPERIMENT, cta)
 
-            inner_fold_train_dataset = CombineDataset([dtst for idx, dtst in enumerate(inner_folds) if idx != curr_inner_fold_idx])
-            inner_fold_val_dataset = inner_folds[curr_inner_fold_idx]
-
             if cta:
                 labeled_training_dataset, unlabeled_training_dataset, valid_dataset, cta_dataset = data.vanilla_dataset_to_unlabeled(inner_fold_train_dataset)
             else:
@@ -113,7 +97,7 @@ def main(CONFIG: DictConfig) -> None:
                     unlabeled_training_dataset, CONFIG.DATASET.mu)
             experiment.validation_loader(valid_dataset)
             experiment.fitting()
-            logger.info(f"======= Training done outer fold {curr_outer_fold_idx} inner fold {curr_inner_fold_idx} =======")
+            logger.info(f"======= Training done outer fold {idx_outer_fold} inner fold {idx_inner_fold} =======")
             experiment.test_loader(inner_fold_val_dataset)
             test_loss, top1_acc, top5_acc = experiment.testing()
 
@@ -128,7 +112,7 @@ def main(CONFIG: DictConfig) -> None:
             best_model, CONFIG.EXPERIMENT, cta)
         experiment.test_loader(outer_fold_val_dataset)
         test_loss, top1_acc, top5_acc = experiment.testing()
-        print(f'OUTER FOLD {curr_outer_fold_idx} TEST')
+        print(f'OUTER FOLD {idx_outer_fold} TEST')
         print(f'top1: {top1_acc}, top5: {top5_acc}')
 
 
