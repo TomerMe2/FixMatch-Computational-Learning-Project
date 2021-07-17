@@ -250,8 +250,6 @@ class FMExperiment(object):
             unlabelled_weak_top5_acc_meter.update(weak_top5_acc.item())
             batch_time_meter.update(time.time() - start)
 
-            print(f'going done batch {batch_idx}')
-
             # save confusion matrix every 100 steps
             if self.save_cfmatrix and batch_idx % self.params.save_matrix_every == 0:  #
                 outputs_labelled = torch.argmax(outputs_labelled, dim=-1)
