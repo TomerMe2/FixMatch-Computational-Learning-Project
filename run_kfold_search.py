@@ -30,6 +30,7 @@ def main(CONFIG: DictConfig) -> None:
 
     is_suggested_improvement = CONFIG.EXPERIMENT.is_suggested_improvement
     CSV_LOG_PATH = 'metrics_improvement_suggestion_log.csv' if is_suggested_improvement else 'metrics_log.csv'
+    algorithm_name = 'RatioFixMatch' if is_suggested_improvement else 'FixMatch'
 
     with open(CSV_LOG_PATH, 'a') as fd:
         if is_suggested_improvement:
@@ -159,7 +160,7 @@ def main(CONFIG: DictConfig) -> None:
         logger.info('======= Outer Fold Test ========')
         acc, tpr, fpr, precision, auc, time_took_per_1k = experiment.testing()
 
-        to_write = f'CIFAR10,FixMatch,{idx_outer_fold + 1},{best_lambda},{best_threshold},{acc},{tpr},{fpr},{precision},{auc},{best_model_training_time},{time_took_per_1k}'
+        to_write = f'CIFAR10,{algorithm_name},{idx_outer_fold + 1},{best_lambda},{best_threshold},{acc},{tpr},{fpr},{precision},{auc},{best_model_training_time},{time_took_per_1k}'
         with open(CSV_LOG_PATH, 'a') as fd:
             fd.write(to_write + '\n')
 
