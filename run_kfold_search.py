@@ -20,33 +20,22 @@ OUTER_KFOLD = 10
 INNER_KFOLD = 3
 N_SEARCHES = 50
 
-CSV_LOG_PATH = 'metrics_log.csv'
+
 
 @hydra.main(config_path='./config', config_name='config')
 def main(CONFIG: DictConfig) -> None:
-    # # configuration
-    # parser = argparse.ArgumentParser(description='Generic runner for FixMatch')
-    # parser.add_argument('--config',  '-c',
-    #                     dest="filename",
-    #                     metavar='FILE',
-    #                     help =  'path to the config file',
-    #                     default='config/config.yaml')
-
-    # args = parser.parse_args()
-    # with open(args.filename, 'r') as file:
-    #     try:
-    #         config_file = yaml.safe_load(file)
-    #     except yaml.YAMLError as exc:
-    #         print(exc)
-    # CONFIG = edict(config_file)
-    # print('==> CONFIG is: \n', OmegaConf.to_yaml(CONFIG), '\n')
-
     # initial logging file
     logger = setup_default_logging(CONFIG, string='Train')
     logger.info(CONFIG)
 
+    is_suggested_improvement = CONFIG.EXPERIMENT.is_suggested_improvement
+    CSV_LOG_PATH = 'metrics_improvement_suggestion_log.csv' if is_suggested_improvement else 'metrics_log.csv'
+
     with open(CSV_LOG_PATH, 'a') as fd:
-        fd.write('dataset,algorithm_name,cross_validation,lambda,threshold,acc,tpr,fpr,precision,auc,training_time (s),time_took_per_1k (s)\n')
+        if is_suggested_improvement:
+            fd.write('dataset,algorithm_name,cross_validation,lambda,proportion_threshold,acc,tpr,fpr,precision,auc,training_time (s),time_took_per_1k (s)\n')
+        else:
+            fd.write('dataset,algorithm_name,cross_validation,lambda,threshold,acc,tpr,fpr,precision,auc,training_time (s),time_took_per_1k (s)\n')
 
     # # For reproducibility, set random seed
     if CONFIG.Logging.seed == 'None':
@@ -78,10 +67,15 @@ def main(CONFIG: DictConfig) -> None:
         best_threshold, best_lambda = None, None
         for search_idx in range(N_SEARCHES):
             # optimization for:
-            # what thershold we need to have a confident label
-            CONFIG.EXPERIMENT.threshold = np.random.uniform(0.5, 0.99)
             # what loss is added to the confident label (1 is default)
             CONFIG.EXPERIMENT.lambda_unlabeled = np.random.uniform(0.5, 1)
+
+            if is_suggested_improvement:
+                # what threshold we need for the ratio between the max label and the one before max label
+                CONFIG.EXPERIMENT.proportion_threshold = np.random.uniform(2, 4)
+            else:
+                # what threshold we need to have a confident label
+                CONFIG.EXPERIMENT.threshold = np.random.uniform(0.5, 0.99)
 
             idx_inner_fold = 0
             best_model_random, best_model_top1_acc_random = None, None
@@ -136,7 +130,10 @@ def main(CONFIG: DictConfig) -> None:
                 if best_model_random is None or top1_acc > best_model_top1_acc_random:
                     best_model_random = model
                     best_model_top1_acc_random = top1_acc
-                    best_threshold = CONFIG.EXPERIMENT.threshold
+                    if is_suggested_improvement:
+                        best_threshold = CONFIG.EXPERIMENT.proportion_threshold
+                    else:
+                        best_threshold = CONFIG.EXPERIMENT.threshold
                     best_lambda = CONFIG.EXPERIMENT.lambda_unlabeled
                     best_model_training_time = curr_training_time
 
