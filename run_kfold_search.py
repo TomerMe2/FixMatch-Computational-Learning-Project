@@ -67,7 +67,6 @@ def main(CONFIG: DictConfig) -> None:
     dataset.transform = None
     test_dataset.transform = None
 
-    training_time = None
     idx_outer_fold = 0
     best_model_outer, best_model_top1_acc_outer = None, None
     for outer_train, outer_val in KFold(n_splits=OUTER_KFOLD).split(range(len(dataset))):
@@ -75,8 +74,7 @@ def main(CONFIG: DictConfig) -> None:
         outer_fold_train_dataset.transform = None
         outer_fold_val_dataset.transform = None
 
-
-        best_model_inner, best_model_top1_acc_inner = None, None
+        best_model_inner, best_model_top1_acc_inner, best_model_training_time = None, None, None
         best_threshold, best_lambda = None, None
         for search_idx in range(N_SEARCHES):
             # optimization for:
@@ -120,14 +118,12 @@ def main(CONFIG: DictConfig) -> None:
                         unlabeled_training_dataset, CONFIG.DATASET.mu)
                 experiment.validation_loader(valid_dataset)
 
-                if training_time is None:
-                    start_fit = time.time()
+                start_fit = time.time()
 
                 experiment.fitting()
 
-                if training_time is None:
-                    end_fit = time.time()
-                    training_time = end_fit - start_fit   # seconds
+                end_fit = time.time()
+                curr_training_time = end_fit - start_fit   # seconds
 
                 print("======= Training done =======")
                 logger.info("======= Training done =======")
@@ -142,6 +138,7 @@ def main(CONFIG: DictConfig) -> None:
                     best_model_top1_acc_random = top1_acc
                     best_threshold = CONFIG.EXPERIMENT.threshold
                     best_lambda = CONFIG.EXPERIMENT.lambda_unlabeled
+                    best_model_training_time = curr_training_time
 
                 idx_inner_fold += 1
 
@@ -165,7 +162,7 @@ def main(CONFIG: DictConfig) -> None:
         logger.info('======= Outer Fold Test ========')
         acc, tpr, fpr, precision, auc, time_took_per_1k = experiment.testing()
 
-        to_write = f'CIFAR10,FixMatch,{idx_outer_fold + 1},{best_lambda},{best_threshold},{acc},{tpr},{fpr},{precision},{auc},{training_time},{time_took_per_1k}'
+        to_write = f'CIFAR10,FixMatch,{idx_outer_fold + 1},{best_lambda},{best_threshold},{acc},{tpr},{fpr},{precision},{auc},{best_model_training_time},{time_took_per_1k}'
         with open(CSV_LOG_PATH, 'a') as fd:
             fd.write(to_write + '\n')
 
@@ -177,10 +174,6 @@ def main(CONFIG: DictConfig) -> None:
         if best_model_outer is None or best_model_top1_acc_inner > best_model_top1_acc_outer:
             best_model_outer = best_model_inner
             best_model_top1_acc_outer = best_model_top1_acc_inner
-
-    # TODO: COMPUTE METRICS ON THE BEST MODEL
-    print(f'best threshold: {best_threshold}')
-    print(f'best lambda: {best_lambda}')
 
 
 if __name__ == '__main__':
