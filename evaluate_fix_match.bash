@@ -11,3 +11,4 @@ python run_kfold_search.py DATASET.label_num=10 DATASET.strongaugment='RA' EXPER
 python label_spreading_model.py
 
 # To evaluate them using ANOVA and Tukey Post Hoc if needed
+python compare_models.py
