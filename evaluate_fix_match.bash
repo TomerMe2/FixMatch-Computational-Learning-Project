@@ -6,3 +6,8 @@ python run_kfold_search.py DATASET.label_num=10 DATASET.strongaugment='RA' EXPER
 
 # To evaluate our suggested improvement (Ratio Fix Match):
 python run_kfold_search.py DATASET.label_num=10 DATASET.strongaugment='RA' EXPERIMENT.epoch_n=1 EXPERIMENT.is_suggested_improvement=1
+
+# To evaluate label spreading (the model that we compare against)
+python label_spreading_model.py
+
+# To evaluate them using ANOVA and Tukey Post Hoc if needed
